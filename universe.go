@@ -1,34 +1,46 @@
 package ecs
 
 import "reflect"
+import "runtime"
 
 type system struct {
     fn reflect.Value
     components []reflect.Type
-    entities []interface{}
+    entitiesArgs [][]reflect.Value
 }
 
 func (s *system) process(){
-    for _, entity := range s.entities {
-        var in []reflect.Value
-        for _, sysComp := range s.components {
-            arg := reflect.ValueOf(entity).Elem().FieldByName(sysComp.Name()).Addr()
-            in = append(in, arg)
+    job := func(argSet [][]reflect.Value, c chan int){
+        for _, args := range argSet {
+                s.fn.Call(args)
         }
-        s.fn.Call(in)
+        c <- 1
     }
+
+    var numCPU = runtime.NumCPU()
+    c := make(chan int)
+	part := len(s.entitiesArgs)/numCPU + 1
+	for i:=0; i < numCPU; i++ {
+		start := part*i
+		end := part*(i+1)
+		if end > len(s.entitiesArgs) {
+			end = len(s.entitiesArgs)
+		}
+        go job(s.entitiesArgs[start:end], c)
+	}
+
+	for i:=0; i < numCPU; i++ {
+        <-c
+	}
 }
 
+// Universe contains and handles all systems and entities.
 type Universe struct {
     systems []*system
-    entitiesByType map[reflect.Type][]interface{}
 }
 
-func NewUniverse() *Universe{
-    u := Universe{}
-    return &u
-}
-
+// AddSystem adds a System to the Universe.
+// System is function taking pointers to components as arguments.
 func (u *Universe) AddSystem(sys interface{}){
     fn := reflect.ValueOf(sys)
     fnLen := fn.Type().NumIn()
@@ -39,6 +51,8 @@ func (u *Universe) AddSystem(sys interface{}){
     u.systems = append(u.systems, &system{fn, components, nil})
 }
 
+// AddEntity takes a pointer to a struct (entity) which contains components.
+// Components are extracted from entities dynamically and assigned to systems.
 func (u *Universe) AddEntity(e interface{}){
     eType := reflect.TypeOf(e).Elem()
     eLen := eType.NumField()
@@ -57,11 +71,17 @@ func (u *Universe) AddEntity(e interface{}){
             }
         }
         if matches == len(sys.components) {
-            sys.entities = append(sys.entities, e)
+            var in []reflect.Value
+            for _, sysComp := range sys.components {
+                arg := reflect.ValueOf(e).Elem().FieldByName(sysComp.Name()).Addr()
+                in = append(in, arg)
+            }
+            sys.entitiesArgs = append(sys.entitiesArgs, in)
         }
     }
 }
 
+// Process processes systems in the order they are addedto the universe 
 func (u *Universe) Process(){
     for _, sys := range u.systems {
         sys.process()
