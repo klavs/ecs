@@ -10,17 +10,18 @@ func MyUniverse() *ecs.Universe{
     universe.AddSystem(RenderSystem)
     universe.AddSystem(RenderSystem)
 
-    ball := Ball{
-        Position{12,24},
-        Movement{3,Direction{1,2}},
+    counter := make([]interface{}, 512)
+    for range counter {
+        ball := Ball{
+            Position{12,24},
+            Movement{3,Direction{1,2}},
+        }
+        universe.AddEntity(&ball)
+        item := StaticItem{
+            Position{10,10},
+        }
+        universe.AddEntity(&item)
     }
-
-    item := StaticItem{
-        Position{10,10},
-    }
-
-    universe.AddEntity(&ball)
-    universe.AddEntity(&item)
 
     return universe
 }

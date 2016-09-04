@@ -2,70 +2,68 @@ package ecs
 
 import "reflect"
 
+type system struct {
+    fn reflect.Value
+    components []reflect.Type
+    entities []interface{}
+}
+
+func (s *system) process(){
+    for _, entity := range s.entities {
+        var in []reflect.Value
+        for _, sysComp := range s.components {
+            arg := reflect.ValueOf(entity).Elem().FieldByName(sysComp.Name()).Addr()
+            in = append(in, arg)
+        }
+        s.fn.Call(in)
+    }
+}
+
 type Universe struct {
-    systems []interface{}
+    systems []*system
     entitiesByType map[reflect.Type][]interface{}
 }
 
 func NewUniverse() *Universe{
     u := Universe{}
-    u.entitiesByType = make(map[reflect.Type][]interface{})
     return &u
 }
 
 func (u *Universe) AddSystem(sys interface{}){
-    u.systems = append(u.systems, sys)
+    fn := reflect.ValueOf(sys)
+    fnLen := fn.Type().NumIn()
+    components := make([]reflect.Type, fnLen, fnLen)
+    for i:=0; i < fnLen; i++ {
+        components[i] = fn.Type().In(i).Elem()
+    }
+    u.systems = append(u.systems, &system{fn, components, nil})
 }
 
 func (u *Universe) AddEntity(e interface{}){
     eType := reflect.TypeOf(e).Elem()
     eLen := eType.NumField()
+    components := make([]reflect.Type, eLen, eLen)
     for i:=0; i < eLen; i++ {
-        fieldType := eType.Field(i).Type
-        entitiesForType := u.entitiesByType[fieldType]
-        if entitiesForType == nil {
-            entitiesForType = make([]interface{}, 0)
+        components[i] = eType.Field(i).Type
+    }
+
+    for _, sys := range u.systems {
+        matches := 0
+        for _, sysComp := range sys.components {
+            for _, entityComp := range components {
+                if sysComp == entityComp {
+                    matches++
+                }
+            }
         }
-        u.entitiesByType[fieldType] = append(entitiesForType, e)
-    } 
+        if matches == len(sys.components) {
+            sys.entities = append(sys.entities, e)
+        }
+    }
 }
 
 func (u *Universe) Process(){
-    for _, sys := range(u.systems) {
-        fnType := reflect.TypeOf(sys)
-        fnLen := fnType.NumIn()
-        candidates := make([][]interface{}, fnLen, fnLen)
-        for i:=0; i < fnLen; i++ {
-            fieldType := fnType.In(i).Elem()
-            candidates[i] = u.entitiesByType[fieldType]
-        }
-
-        entities := make(map[interface{}]int)
-        for _, c := range(candidates) {
-            for _, e := range(c) {
-                entities[e]++
-            }
-        }
-
-        var matches []interface{}
-        for e, count := range(entities) {
-            if count == fnLen {
-                matches = append(matches, e)
-            } 
-        }
-
-        sysFunc := reflect.ValueOf(sys)
-
-        for _, match := range(matches) {
-            matchValue := reflect.ValueOf(match).Elem()
-            var in []reflect.Value
-            for i:=0; i < fnLen; i++ {
-                argName := fnType.In(i).Elem().Name()
-                arg := matchValue.FieldByName(argName).Addr()
-                in = append(in, arg)
-            }
-            sysFunc.Call(in)
-        }
-
+    for _, sys := range u.systems {
+        sys.process()
     }
 }
